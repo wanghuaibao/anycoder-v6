@@ -1,5 +1,6 @@
 import { SYSTEM_MESSAGE } from "@/lib/system";
-import { anthropic } from "@ai-sdk/anthropic";
+import { createOpenAI } from "@ai-sdk/openai";
+import { createAnthropic } from "@ai-sdk/anthropic";
 import { Agent } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
 import { Memory } from "@mastra/memory";
@@ -28,9 +29,20 @@ export const memory = new Memory({
   ],
 });
 
+// Claude CLI 本地API配置
+const claudeCLI = createOpenAI({
+  baseURL: process.env.CLAUDE_CLI_BASE_URL || "http://localhost:8000/v1",
+  apiKey: process.env.CLAUDE_CLI_API_KEY || "dummy-key",
+});
+
+// Anthropic API 配置（后备）
+const anthropic = createAnthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+
 export const builderAgent = new Agent({
   name: "BuilderAgent",
-  model: anthropic("claude-3-7-sonnet-20250219"),
+  model: claudeCLI("claude-code"),
   instructions: SYSTEM_MESSAGE,
   memory,
   tools: {

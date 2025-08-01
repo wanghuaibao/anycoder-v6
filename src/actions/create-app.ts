@@ -3,7 +3,7 @@
 import { sendMessage } from "@/app/api/chat/route";
 import { getUser } from "@/auth/stack-auth";
 import { appsTable, appUsers } from "@/db/schema";
-import { db } from "@/lib/db";
+import { db, withDatabaseRetry } from "@/lib/db";
 import { freestyle } from "@/lib/freestyle";
 import { templates } from "@/lib/templates";
 import { memory } from "@/mastra/agents/builder";
@@ -15,9 +15,10 @@ export async function createApp({
   initialMessage?: string;
   templateId: string;
 }) {
-  console.time("get user");
+  const requestId = crypto.randomUUID().slice(0, 8);
+  console.time(`get user ${requestId}`);
   const user = await getUser();
-  console.timeEnd("get user");
+  console.timeEnd(`get user ${requestId}`);
 
   if (!templates[templateId]) {
     throw new Error(
@@ -25,7 +26,7 @@ export async function createApp({
     );
   }
 
-  console.time("git");
+  console.time(`git ${requestId}`);
   const repo = await freestyle.createGitRepository({
     name: "Unnamed App",
     public: true,
@@ -44,49 +45,53 @@ export async function createApp({
     identityId: user.freestyleIdentity,
   });
 
-  console.timeEnd("git");
+  console.timeEnd(`git ${requestId}`);
 
-  console.time("dev server");
+  console.time(`dev server ${requestId}`);
   const { mcpEphemeralUrl } = await freestyle.requestDevServer({
     repoId: repo.repoId,
   });
-  console.timeEnd("dev server");
+  console.timeEnd(`dev server ${requestId}`);
 
-  console.time("database: create app");
-  const app = await db.transaction(async (tx) => {
-    const appInsertion = await tx
-      .insert(appsTable)
-      .values({
-        gitRepo: repo.repoId,
-        name: initialMessage,
-      })
-      .returning();
+  console.time(`database: create app ${requestId}`);
+  const app = await withDatabaseRetry(async () => {
+    return await db.transaction(async (tx) => {
+      const appInsertion = await tx
+        .insert(appsTable)
+        .values({
+          gitRepo: repo.repoId,
+          name: initialMessage,
+        })
+        .returning();
 
-    await tx
-      .insert(appUsers)
-      .values({
-        appId: appInsertion[0].id,
-        userId: user.userId,
-        permissions: "admin",
-        freestyleAccessToken: token.token,
-        freestyleAccessTokenId: token.id,
-        freestyleIdentity: user.freestyleIdentity,
-      })
-      .returning();
+      await tx
+        .insert(appUsers)
+        .values({
+          appId: appInsertion[0].id,
+          userId: user.userId,
+          permissions: "admin",
+          freestyleAccessToken: token.token,
+          freestyleAccessTokenId: token.id,
+          freestyleIdentity: user.freestyleIdentity,
+        })
+        .returning();
 
-    return appInsertion[0];
+      return appInsertion[0];
+    });
   });
-  console.timeEnd("database: create app");
+  console.timeEnd(`database: create app ${requestId}`);
 
-  console.time("mastra: create thread");
-  await memory.createThread({
-    threadId: app.id,
-    resourceId: app.id,
+  console.time(`mastra: create thread ${requestId}`);
+  await withDatabaseRetry(async () => {
+    await memory.createThread({
+      threadId: app.id,
+      resourceId: app.id,
+    });
   });
-  console.timeEnd("mastra: create thread");
+  console.timeEnd(`mastra: create thread ${requestId}`);
 
   if (initialMessage) {
-    console.time("send initial message");
+    console.time(`send initial message ${requestId}`);
     await sendMessage(app.id, mcpEphemeralUrl, {
       id: crypto.randomUUID(),
       parts: [
@@ -97,7 +102,7 @@ export async function createApp({
       ],
       role: "user",
     });
-    console.timeEnd("send initial message");
+    console.timeEnd(`send initial message ${requestId}`);
   }
 
   return app;

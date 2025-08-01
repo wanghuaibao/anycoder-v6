@@ -45,3 +45,12 @@ next-env.d.ts
 /git/
 
 dump.rdb
+
+# development logs
+dev.log
+*.log
+
+# backup files
+*.backup
+*.bak
+*.tmp
